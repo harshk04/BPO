@@ -1,108 +1,108 @@
-# Offline Document Text Upscaler (Real-ESRGAN)
+# Loan Document Processing Pipeline
 
-This project enhances blurry document/text images (receipts, invoices, cropped text) using:
-- preprocessing (denoise + luminance contrast + optional sharpening/deblur)
-- Real-ESRGAN super-resolution (x2/x4)
-- text-focused postprocessing (edge-aware sharpening + local contrast)
+An end-to-end intelligent document processing system that automatically extracts and processes loan information from document images using computer vision and AI.
 
-It runs fully local/offline after dependencies and model weights are present.
+## Overview
+
+This project combines multiple technologies to:
+1. **Detect loan document fields** using Roboflow object detection
+2. **Extract data** from detected regions using Google Gemini AI vision API
+3. **Calculate loan metrics** (interest, insurance, principal reduction)
+4. **Generate structured Excel output** with processed loan records
+
+## Features
+
+- Batch processing of multiple loan documents
+- Automatic field detection using Roboflow
+- AI-powered data extraction with error handling
+- Loan calculations (interest rates, insurance, principal reduction)
+- Structured Excel output generation
+- Comprehensive logging of processing steps
 
 ## Project Structure
 
-- `main.py` -> CLI app for single image or batch folder processing
-- `enhancer.py` -> enhancement pipeline and function API
-- `upscale.py` -> hardcoded runner so you can run `python upscale.py`
-- `requirements.txt` -> Python dependencies
+- `final.py` - Main orchestration pipeline (Roboflow detection → Gemini extraction → Excel output)
+- `maingem.py` - Google Gemini AI data extraction module
+- `roboflow_inference.py` - Roboflow object detection integration
+- `excel_loan_calculator.py` - Loan calculation and financial metrics
+- `run_logger.py` - Logging utility
+- `images/` - Input loan document images
+- `outputs/` - Detection results and cropped regions from Roboflow
+- `logs/` - Processing logs
 
-## Installation (exact steps)
+## Installation
 
-1. Create and activate a virtual environment:
+1. Clone or download the project
+2. Create and activate a virtual environment:
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 ```
 
-2. Install dependencies:
+3. Install dependencies:
 
 ```bash
 pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-If `torch` install fails on your machine, install PyTorch first from the official selector and then re-run `pip install -r requirements.txt`.
+## Configuration
 
-## Run Commands
+### Environment Variables
 
-### Quick run (hardcoded defaults)
+Create a `.env` file in the project root with:
+
+```
+ROBOFLOW_API_KEY=your_roboflow_api_key
+ROBOFLOW_PROJECT=your_project_name
+ROBOFLOW_VERSION=your_model_version
+GOOGLE_API_KEY=your_google_api_key
+```
+
+### Roboflow Setup
+
+- Configure Roboflow detection thresholds in `roboflow_inference.py`
+- Adjust confidence and overlap parameters as needed
+
+## Usage
+
+### Run Main Pipeline
 
 ```bash
-python upscale.py
+python final.py
 ```
 
-Default behavior in `upscale.py`:
-- input: `Sample20.jpg`
-- output folder: `outputs`
-- scale: `4`
-- denoise + sharpen: enabled
+This will:
+- Process images from the `images/` folder
+- Run Roboflow detection
+- Extract data using Gemini AI
+- Calculate loan metrics
+- Generate `final_loan_outputs.xlsx`
 
-You can edit `DEFAULT_ARGS` inside `upscale.py` to hardcode your own paths.
-
-### Single image via CLI
+### Process Individual Images
 
 ```bash
-python main.py --input Sample20.jpg --output outputs --scale 4 --sharpen --denoise
+python maingem.py
 ```
 
-### Folder/batch via CLI
+Processes images from the configured input folder and extracts structured loan data.
 
-```bash
-python main.py --input images --output outputs --batch --scale 4 --sharpen --denoise
-```
+## Output
 
-### Same CLI through `upscale.py`
+The pipeline generates:
+- `final_loan_outputs.xlsx` - Structured loan records with calculated metrics
+- `extracted_loan_records.xlsx` - Raw extracted data (from Gemini)
+- `outputs/` - Detection results and cropped loan document fields
+- `logs/` - Detailed processing logs
 
-```bash
-python upscale.py --input images --output outputs --batch --scale 2 --no-sharpen
-```
+## Data Extracted
 
-## CLI Flags
-
-- `--input` image path or folder path
-- `--output` output folder (auto-created if missing)
-- `--scale` upscale factor (`2` or `4`)
-- `--batch` process entire input folder
-- `--sharpen` / `--no-sharpen`
-- `--denoise` / `--no-denoise`
-
-Supported formats: PNG, JPG, JPEG.
-
-## Function API
-
-```python
-from enhancer import enhance_image
-
-enhance_image("input.jpg", "outputs/input_enhanced_x4.jpg", scale=4)
-```
-
-## Model Weights
-
-The script auto-downloads the required Real-ESRGAN weight file into `weights/` on first run:
-- x4: `RealESRGAN_x4plus.pth`
-- x2: `RealESRGAN_x2plus.pth`
-
-If internet is blocked, download manually and place files in:
-
-```text
-./weights/
-```
-
-Then rerun the command offline.
-
-## Why this is suitable for blurry text images
-
-- Document-aware preprocessing improves low-contrast strokes before SR.
-- Real-ESRGAN restores missing high-frequency details while upscaling.
-- Edge-aware postprocessing sharpens character boundaries without strong halos.
-- Pipeline is tuned for readability of text regions, not face/photo beautification.
+- Customer reference number
+- Customer name
+- Address (city, state)
+- Loan details (amount, period, interest rate)
+- Guarantor information
+- Purchase value and down payment
+- Calculated metrics (total interest, insurance rates, etc.)
 
