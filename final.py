@@ -42,6 +42,8 @@ EXCEL_HEADERS = [
     "Total Interest for Loan Period AND Property Insurance Per Month",
 ]
 
+COMMA_PADDED_SEPARATOR = "  ,  "
+
 
 def extract_decimal(value: str, field_name: str) -> Decimal:
     text = str(value or "").replace(",", "")
@@ -61,8 +63,12 @@ def decimal_to_plain(value: Decimal) -> str:
     return text
 
 
+def apply_padded_comma_spacing(text: str) -> str:
+    return text.replace(",", COMMA_PADDED_SEPARATOR)
+
+
 def format_currency(value: Decimal, spaces_after_dollar: int = 2) -> str:
-    grouped = f"{value:,.2f}".replace(",", " , ")
+    grouped = apply_padded_comma_spacing(f"{value:,.2f}")
     return f"$" + (" " * spaces_after_dollar) + grouped
 
 
@@ -70,7 +76,18 @@ def format_currency_trimmed(value: Decimal, spaces_after_dollar: int = 2) -> str
     text = f"{value:,.2f}"
     if "." in text:
         text = text.rstrip("0").rstrip(".")
-    grouped = text.replace(",", " , ")
+    grouped = apply_padded_comma_spacing(text)
+    return f"$" + (" " * spaces_after_dollar) + grouped
+
+
+def format_currency_first_digit_group(value: Decimal, spaces_after_dollar: int = 2) -> str:
+    text = f"{value:.2f}"
+    integer_part, fractional_part = text.split(".")
+    if len(integer_part) > 1:
+        grouped_integer = f"{integer_part[:1]},{integer_part[1:]}"
+    else:
+        grouped_integer = integer_part
+    grouped = apply_padded_comma_spacing(f"{grouped_integer}.{fractional_part}")
     return f"$" + (" " * spaces_after_dollar) + grouped
 
 
@@ -200,7 +217,7 @@ def build_excel_row(record: dict, result: LoanOutputs, insurance_na: bool) -> Li
         if insurance_na
         else (
             f"{format_currency_trimmed(result.total_interest_after_reduction, spaces_after_dollar=3)} AND "
-            f"{format_currency_trimmed(result.insurance_amount_per_month, spaces_after_dollar=2)}"
+            f"{format_currency_first_digit_group(result.insurance_amount_per_month, spaces_after_dollar=2)}"
         )
     )
 
