@@ -10,7 +10,7 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 try:
     from dotenv import load_dotenv
@@ -242,13 +242,22 @@ def draw_and_save_outputs(
     return {"detections": saved_detections}
 
 
-def run_inference(image_path: Path, output_dir: Path, settings: RoboflowSettings) -> Dict[str, Any]:
+def load_model(settings: RoboflowSettings) -> Any:
     rf = Roboflow(api_key=settings.api_key)
     workspace = rf.workspace(settings.workspace)
     project = workspace.project(settings.project)
-    model = project.version(settings.version).model
+    return project.version(settings.version).model
 
-    prediction_result = model.predict(
+
+def run_inference(
+    image_path: Path,
+    output_dir: Path,
+    settings: RoboflowSettings,
+    model: Optional[Any] = None,
+) -> Dict[str, Any]:
+    prediction_model = model if model is not None else load_model(settings)
+
+    prediction_result = prediction_model.predict(
         str(image_path),
         confidence=settings.confidence,
         overlap=settings.overlap,
