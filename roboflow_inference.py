@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run Roboflow inference on a local image and save selected cropped outputs."""
+"""Run Roboflow inference on a local image and save class-filtered cropped outputs."""
 
 from __future__ import annotations
 
@@ -28,10 +28,11 @@ except ImportError:
     Roboflow = None
 
 # Set this if you prefer hard-coding an image path instead of using --image.
-DEFAULT_IMAGE_PATH = "Sample11.jpg"
+DEFAULT_IMAGE_PATH = "images/Sample 300.jpg"
 DEFAULT_OUTPUT_DIR = "outputs"
 DEFAULT_CONFIDENCE = 50
 DEFAULT_OVERLAP = 50
+TARGET_CLASS = "BPO"
 
 
 @dataclass
@@ -78,6 +79,10 @@ def sanitize_stem(stem: str) -> str:
     return compact or "image"
 
 
+def is_target_class(class_name: str) -> bool:
+    return class_name.strip().lower() == TARGET_CLASS.lower()
+
+
 def clear_previous_outputs(output_dir: Path, image_prefix: str) -> None:
     crop_pattern = re.compile(rf"^{re.escape(image_prefix)}-\d+\.[A-Za-z0-9]+$")
     annotated_pattern = re.compile(rf"^{re.escape(image_prefix)}-annotated\.[A-Za-z0-9]+$")
@@ -94,8 +99,8 @@ def clear_previous_outputs(output_dir: Path, image_prefix: str) -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Run Roboflow detection and save crops for only middle detections "
-            "(skip first and last)."
+            "Run Roboflow detection and save crops only for detections "
+            f"with class '{TARGET_CLASS}'."
         )
     )
     parser.add_argument(
@@ -127,7 +132,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def load_settings(args: argparse.Namespace) -> RoboflowSettings:
-    load_dotenv()
+    # Ensure .env values are used even if shell env vars were set previously.
+    load_dotenv(override=True)
 
     version_raw = required_env("ROBOFLOW_VERSION")
     try:
@@ -225,8 +231,12 @@ def draw_and_save_outputs(
         )
 
     saved_detections: List[Dict[str, Any]] = []
-    for detection in detections[1:-1]:
-        crop_path = output_dir / f"{image_prefix}-{detection['index']}{image_ext}"
+    for detection in detections:
+        if not is_target_class(detection["class"]):
+            continue
+
+        crop_index = len(saved_detections) + 1
+        crop_path = output_dir / f"{image_prefix}-{crop_index}{image_ext}"
         crop = base_image.crop(
             (
                 detection["left"],
@@ -236,6 +246,7 @@ def draw_and_save_outputs(
             )
         )
         crop.save(crop_path)
+        detection["crop_index"] = crop_index
         detection["crop_path"] = str(crop_path.resolve())
         saved_detections.append(detection)
 
@@ -306,8 +317,12 @@ def main() -> int:
     result = run_inference(image_path=image_path.resolve(), output_dir=output_dir, settings=settings)
 
     print(f"Input image: {image_path.resolve()}")
+    print(
+        "Roboflow model: "
+        f"{settings.workspace}/{settings.project} (version={settings.version})"
+    )
     print(f"Output folder: {result['result_dir']}")
-    print(f"Saved crops: {len(result['detections'])} (skipping first and last detection)")
+    print(f"Saved crops: {len(result['detections'])} (class='{TARGET_CLASS}')")
 
     if result["detections"]:
         print("\nBounding boxes and crops:")
