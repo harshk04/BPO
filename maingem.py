@@ -2,8 +2,11 @@ import json
 import mimetypes
 import os
 import re
+import time
+from contextlib import contextmanager
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from threading import Lock, Semaphore
 from typing import Any, Dict, List, Optional, Tuple
 
 from dotenv import load_dotenv
@@ -255,6 +258,50 @@ NUMBER_WORDS = {
 
 class ExtractionError(RuntimeError):
     pass
+
+
+class ApiRateLimiter:
+    def __init__(
+        self,
+        max_concurrent_requests: int = 1,
+        max_requests_per_minute: int = 0,
+    ) -> None:
+        if max_concurrent_requests < 1:
+            raise ValueError("max_concurrent_requests must be at least 1.")
+        if max_requests_per_minute < 0:
+            raise ValueError("max_requests_per_minute cannot be negative.")
+
+        self._semaphore = Semaphore(max_concurrent_requests)
+        self._interval_seconds = (
+            60.0 / float(max_requests_per_minute)
+            if max_requests_per_minute > 0
+            else 0.0
+        )
+        self._interval_lock = Lock()
+        self._next_allowed_at = 0.0
+
+    @contextmanager
+    def acquire(self):
+        self._semaphore.acquire()
+        try:
+            self._wait_for_rate_window()
+            yield
+        finally:
+            self._semaphore.release()
+
+    def _wait_for_rate_window(self) -> None:
+        if self._interval_seconds <= 0:
+            return
+
+        while True:
+            with self._interval_lock:
+                now = time.monotonic()
+                if now >= self._next_allowed_at:
+                    self._next_allowed_at = now + self._interval_seconds
+                    return
+                sleep_seconds = self._next_allowed_at - now
+            if sleep_seconds > 0:
+                time.sleep(sleep_seconds)
 
 
 def image_to_part(image_path: str) -> types.Part:
@@ -589,6 +636,7 @@ def call_structured_model(
     user_text: str,
     logger: Optional[RunLogger] = None,
     step_name: str = "llm_step",
+    rate_limiter: Optional[ApiRateLimiter] = None,
 ) -> Dict[str, Any]:
     if logger is not None:
         logger.section(f"LLM STEP: {step_name}")
@@ -596,9 +644,9 @@ def call_structured_model(
         logger.log(f"model={model}")
         logger.log(f"user_text={user_text}")
 
-    response = client.models.generate_content(
-        model=model,
-        contents=[
+    request_args = {
+        "model": model,
+        "contents": [
             types.UserContent(
                 parts=[
                     types.Part.from_text(text=user_text),
@@ -606,13 +654,19 @@ def call_structured_model(
                 ]
             ),
         ],
-        config=types.GenerateContentConfig(
+        "config": types.GenerateContentConfig(
             system_instruction=prompt,
             response_mime_type="application/json",
             response_json_schema=schema["schema"],
             temperature=0,
         ),
-    )
+    }
+
+    if rate_limiter is not None:
+        with rate_limiter.acquire():
+            response = client.models.generate_content(**request_args)
+    else:
+        response = client.models.generate_content(**request_args)
 
     if logger is not None:
         raw_text = getattr(response, "text", "")
@@ -634,6 +688,7 @@ def call_model(
     model: str,
     image_path: str,
     logger: Optional[RunLogger] = None,
+    rate_limiter: Optional[ApiRateLimiter] = None,
 ) -> Dict[str, str]:
     payload = call_structured_model(
         client=client,
@@ -644,6 +699,7 @@ def call_model(
         user_text=build_user_message(image_path),
         logger=logger,
         step_name="primary_extraction",
+        rate_limiter=rate_limiter,
     )
     return ensure_required_keys(payload)
 
@@ -654,6 +710,7 @@ def call_second_pass(
     image_path: str,
     current: Dict[str, str],
     logger: Optional[RunLogger] = None,
+    rate_limiter: Optional[ApiRateLimiter] = None,
 ) -> Dict[str, str]:
     user_text = (
         f"File name: {Path(image_path).name}\n"
@@ -670,6 +727,7 @@ def call_second_pass(
         user_text=user_text,
         logger=logger,
         step_name="second_pass_correction",
+        rate_limiter=rate_limiter,
     )
     return ensure_second_pass_keys(payload)
 
@@ -835,12 +893,19 @@ def process_single_image(
     model: str,
     image_path: Path,
     logger: Optional[RunLogger] = None,
+    rate_limiter: Optional[ApiRateLimiter] = None,
 ) -> Dict[str, str]:
     if logger is not None:
         logger.section(f"IMAGE START: {image_path.name}")
         logger.log(f"image_path={image_path}")
 
-    extracted = call_model(client, model, str(image_path), logger=logger)
+    extracted = call_model(
+        client,
+        model,
+        str(image_path),
+        logger=logger,
+        rate_limiter=rate_limiter,
+    )
     if logger is not None:
         logger.log_json("PRIMARY EXTRACTION (NORMALIZED KEYS)", extracted)
 
@@ -851,7 +916,14 @@ def process_single_image(
     if needs_second_pass(final_output):
         if logger is not None:
             logger.log("second_pass_required=true")
-        second_pass = call_second_pass(client, model, str(image_path), final_output, logger=logger)
+        second_pass = call_second_pass(
+            client,
+            model,
+            str(image_path),
+            final_output,
+            logger=logger,
+            rate_limiter=rate_limiter,
+        )
         if logger is not None:
             logger.log_json("SECOND PASS OUTPUT", second_pass)
         merged = merge_second_pass(final_output, second_pass)
