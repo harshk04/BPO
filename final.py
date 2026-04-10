@@ -444,7 +444,7 @@ def extract_crop_paths(inference_result: dict) -> List[Path]:
 
 
 def main() -> None:
-    load_dotenv()
+    load_dotenv(override=True)
 
     model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
     gemini_api_keys = parse_gemini_api_keys()
@@ -495,6 +495,9 @@ def main() -> None:
     )
     run_logger.log(f"roboflow_confidence={roboflow_settings.confidence}")
     run_logger.log(f"roboflow_overlap={roboflow_settings.overlap}")
+    run_logger.log(f"roboflow_workspace={roboflow_settings.workspace}")
+    run_logger.log(f"roboflow_project={roboflow_settings.project}")
+    run_logger.log(f"roboflow_version={roboflow_settings.version}")
     run_logger.log("roboflow_model_reuse=enabled")
 
     source_image_paths = get_image_paths(INPUT_IMAGES_FOLDER)
